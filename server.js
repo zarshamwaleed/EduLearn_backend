@@ -15,7 +15,9 @@ const fileProgressRoutes = require("./routes/FileProgressRoutes");
 const analyticsRoutes = require("./routes/analytics");
 
 const app = express();
-
+app.get("/", (req, res) => {
+  res.send("API is running 🚀");
+});
 // CORS configuration
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'];
 app.use(cors({
