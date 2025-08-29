@@ -1,0 +1,261 @@
+const express = require("express");
+const router = express.Router();
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const User = require("../models/userModel");
+const validator = require("validator");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
+const { authenticateToken } = require("../middleware/authMiddleware");
+
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = "./Uploads/";
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, file.fieldname + "-" + uniqueSuffix + path.extname(file.originalname));
+  },
+});
+
+const upload = multer({
+  storage: storage,
+  fileFilter: (req, file, cb) => {
+    const filetypes = /jpeg|jpg|png|gif/;
+    const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = filetypes.test(file.mimetype);
+    if (extname && mimetype) {
+      return cb(null, true);
+    } else {
+      return cb(new Error("Only image files are allowed"));
+    }
+  },
+});
+
+router.post("/signup", upload.single("profilePic"), async (req, res) => {
+  const { name, email, phone, password, confirmPassword, role, bio } = req.body;
+
+  const profilePic = req.file ? req.file.path.replace("\\", "/") : "";
+
+  if (!name || !email || !password || !role) {
+    return res.status(400).json({ message: "Please fill all the required fields" });
+  }
+
+  if (!validator.isEmail(email)) {
+    return res.status(400).json({ message: "Invalid email format" });
+  }
+
+  if (password !== confirmPassword) {
+    return res.status(400).json({ message: "Passwords do not match" });
+  }
+
+  try {
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({ message: "Email is already taken" });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    const newUser = new User({
+      name,
+      email,
+      phone,
+      password: hashedPassword,
+      role,
+      profilePic,
+      bio,
+      enrolledCourses: [], // Initialize empty enrolledCourses
+    });
+
+    await newUser.save();
+
+    return res.status(201).json({ message: "Registration successful!" });
+  } catch (error) {
+    console.error("Signup error:", error);
+    return res.status(500).json({ message: "Server error", details: error.message });
+  }
+});
+
+router.post("/signin", async (req, res) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ message: "Please fill all the required fields" });
+  }
+
+  try {
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(400).json({ message: "Invalid email or password" });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Invalid password" });
+    }
+
+    if (!process.env.JWT_SECRET) {
+      console.error("JWT_SECRET is not defined");
+      return res.status(500).json({ message: "JWT secret not set in environment" });
+    }
+
+    const token = jwt.sign(
+      { id: user._id.toString(), role: user.role, name: user.name, email: user.email },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    console.log("Generated JWT token:", token);
+    console.log("Token payload:", { id: user._id.toString(), role: user.role, name: user.name, email: user.email });
+
+    const userData = {
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      profilePic: user.profilePic,
+      bio: user.bio,
+      role: user.role,
+      enrolledCourses: user.enrolledCourses, // Include enrolled courses
+    };
+
+    return res.status(200).json({
+      token,
+      user: userData,
+    });
+  } catch (error) {
+    console.error("Signin error:", error);
+    return res.status(500).json({ message: "Server error", details: error.message });
+  }
+});
+
+router.get("/user/:id", authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    res.json(user);
+  } catch (error) {
+    console.error("Error fetching user:", error);
+    res.status(500).json({ message: "Server error", details: error.message });
+  }
+});
+
+router.get("/profile", authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('-password'); // Exclude password
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    res.json(user);
+  } catch (error) {
+    console.error("Error fetching profile:", error);
+    res.status(500).json({ message: "Server error", details: error.message });
+  }
+});
+
+router.put("/profile", authenticateToken, async (req, res) => {
+  try {
+    const { name, email, bio } = req.body;
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { name, email, bio },
+      { new: true }
+    ).select('-password');
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.json({
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      profilePic: user.profilePic,
+      bio: user.bio,
+      role: user.role,
+      enrolledCourses: user.enrolledCourses,
+    });
+  } catch (error) {
+    console.error("Error updating profile:", error);
+    res.status(500).json({ message: "Server error", details: error.message });
+  }
+});
+
+router.put(
+  "/profile/picture",
+  authenticateToken,
+  upload.single("profilePic"),
+  async (req, res) => {
+    try {
+      const profilePic = req.file ? req.file.path.replace("\\", "/") : null;
+      const user = await User.findByIdAndUpdate(
+        req.user._id,
+        { profilePic },
+        { new: true }
+      ).select('-password');
+
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      res.json({
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        profilePic: user.profilePic,
+        bio: user.bio,
+        role: user.role,
+        enrolledCourses: user.enrolledCourses,
+      });
+    } catch (error) {
+      console.error("Error updating profile picture:", error);
+      res.status(500).json({ message: "Server error", details: error.message });
+    }
+  }
+);
+
+router.put(
+  "/profile/update",
+  authenticateToken,
+  upload.single("profilePic"),
+  async (req, res) => {
+    try {
+      const { name, email, bio } = req.body;
+      const profilePic = req.file ? req.file.path.replace("\\", "/") : null;
+
+      const updateData = { name, email, bio };
+      if (profilePic) updateData.profilePic = profilePic;
+
+      const user = await User.findByIdAndUpdate(req.user._id, updateData, {
+        new: true,
+      }).select('-password');
+
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      res.json({
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        profilePic: user.profilePic,
+        bio: user.bio,
+        role: user.role,
+        enrolledCourses: user.enrolledCourses,
+      });
+    } catch (error) {
+      console.error("Error updating profile:", error);
+      res.status(500).json({ message: "Server error", details: error.message });
+    }
+  }
+);
+
+module.exports = router;

@@ -1,0 +1,353 @@
+const express = require('express');
+const router = express.Router();
+const { Assignment, AssignmentSubmission } = require('../models/assignmentSchemas');
+const mongoose = require('mongoose');
+const multer = require('multer');
+const path = require('path');
+const { authenticateToken, authorizeInstructor } = require('../middleware/authMiddleware');
+const CreateCourse = require('../models/CreateCourse');
+const fs = require('fs');
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'Uploads/');
+  },
+  filename: (req, file, cb) => {
+    cb(null, `${Date.now()}-${file.originalname}`);
+  },
+});
+const upload = multer({ storage });
+
+// Get all assignments for a course (for instructors or general)
+router.get('/courses/:courseId/assignments', authenticateToken, async (req, res) => {
+  try {
+    const course = await CreateCourse.findById(req.params.courseId);
+    if (!course) {
+      return res.status(404).json({ message: 'Course not found' });
+    }
+    if (req.user.role === 'student' && !req.user.enrolledCourses.includes(req.params.courseId)) {
+      return res.status(403).json({ message: 'Not enrolled in this course' });
+    }
+
+    const assignments = await Assignment.find({ courseId: req.params.courseId });
+    const formattedAssignments = assignments.map(assignment => ({
+      _id: assignment._id,
+      courseId: assignment.courseId,
+      title: assignment.title,
+      description: assignment.description || '', // Make sure this is properly set
+      totalMarks: assignment.totalMarks,
+      dueDate: assignment.dueDate.toISOString(),
+      submissionsCount: assignment.submissionsCount,
+      file: assignment.file,
+    }));
+    
+    // Debug log to check if description is coming through
+    console.log('Assignments with descriptions:', formattedAssignments.map(a => ({ 
+      title: a.title, 
+      description: a.description 
+    })));
+    
+    res.json(formattedAssignments);
+  } catch (error) {
+    console.error('Error fetching assignments:', error);
+    res.status(500).json({ message: 'Error fetching assignments', error: error.message });
+  }
+});
+
+// Get all assignments for a course with student-specific submission info
+router.get('/courses/:courseId/assignments/student', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'student') {
+      return res.status(403).json({ message: 'Student access only' });
+    }
+
+    const course = await CreateCourse.findById(req.params.courseId);
+    if (!course) {
+      return res.status(404).json({ message: 'Course not found' });
+    }
+    if (!req.user.enrolledCourses.includes(req.params.courseId)) {
+      return res.status(403).json({ message: 'Not enrolled in this course' });
+    }
+
+    const assignments = await Assignment.find({ courseId: req.params.courseId });
+
+    const studentAssignments = await Promise.all(
+      assignments.map(async (assignment) => {
+        const submission = await AssignmentSubmission.findOne({
+          assignmentId: assignment._id,
+          studentId: req.user._id,
+        });
+
+        return {
+          assignment_id: assignment._id,
+          title: assignment.title,
+          description: assignment.description || '', // Ensure description is included
+          due_date: assignment.dueDate.toISOString(),
+          submitted: !!submission,
+          submitted_on: submission ? submission.submittedOn.toISOString() : null,
+          marks: submission ? submission.marks : null,
+          total_marks: assignment.totalMarks,
+          submission_id: submission ? submission._id : null,
+          file: assignment.file,
+        };
+      })
+    );
+
+    res.json(studentAssignments);
+  } catch (error) {
+    console.error('Error fetching student assignments:', error);
+    res.status(500).json({ message: 'Error fetching student assignments', error: error.message });
+  }
+});
+
+// Get a single assignment by ID
+// Updated backend route with debug logging
+router.get('/assignments/:assignmentId', authenticateToken, async (req, res) => {
+  try {
+    const assignment = await Assignment.findById(req.params.assignmentId);
+    if (!assignment) {
+      return res.status(404).json({ message: 'Assignment not found' });
+    }
+    
+    // Debug logs
+    console.log('Raw assignment from DB:', assignment);
+    console.log('Assignment description from DB:', assignment.description);
+    console.log('Description type:', typeof assignment.description);
+    console.log('Description length:', assignment.description?.length);
+    
+    const responseData = {
+      _id: assignment._id,
+      courseId: assignment.courseId,
+      title: assignment.title,
+      description: assignment.description || '', // Ensure description is included
+      totalMarks: assignment.totalMarks,
+      dueDate: assignment.dueDate.toISOString(),
+      submissionsCount: assignment.submissionsCount,
+      file: assignment.file,
+    };
+    
+    console.log('Response data being sent:', responseData);
+    console.log('Response description:', responseData.description);
+    
+    res.json(responseData);
+  } catch (error) {
+    console.error('Error fetching assignment:', error);
+    res.status(500).json({ message: 'Error fetching assignment', error: error.message });
+  }
+});
+
+// Download assignment file
+router.get('/assignments/:assignmentId/download', authenticateToken, async (req, res) => {
+  try {
+    const assignment = await Assignment.findById(req.params.assignmentId);
+    if (!assignment) {
+      return res.status(404).json({ message: 'Assignment not found' });
+    }
+    if (!assignment.file) {
+      return res.status(404).json({ message: 'No assignment file available' });
+    }
+
+    const course = await CreateCourse.findById(assignment.courseId);
+    if (!course) {
+      return res.status(404).json({ message: 'Course not found' });
+    }
+    if (req.user.role === 'student' && !req.user.enrolledCourses.includes(assignment.courseId.toString())) {
+      return res.status(403).json({ message: 'Not enrolled in this course' });
+    }
+
+    const filePath = path.resolve(__dirname, '..', assignment.file.replace(/^\//, ''));
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ message: 'File not found on server' });
+    }
+
+    res.download(filePath, `${assignment.title}_assignment${path.extname(assignment.file)}`);
+  } catch (error) {
+    console.error('Error downloading assignment file:', error);
+    res.status(500).json({ message: 'Error downloading assignment file', error: error.message });
+  }
+});
+
+// Create a new assignment
+router.post('/courses/:courseId/assignments', authenticateToken, authorizeInstructor, upload.single('file'), async (req, res) => {
+  try {
+    const { title, description, totalMarks, dueDate } = req.body;
+    if (!title || !totalMarks || !dueDate) {
+      return res.status(400).json({ message: 'Title, total marks, and due date are required' });
+    }
+
+    const course = await CreateCourse.findById(req.params.courseId);
+    if (!course) {
+      return res.status(404).json({ message: 'Course not found' });
+    }
+    if (course.instructorId.toString() !== req.user._id) {
+      return res.status(403).json({ message: 'Unauthorized: You are not the instructor of this course' });
+    }
+
+    const newAssignment = new Assignment({
+      courseId: req.params.courseId,
+      title,
+      description: description || '', // Ensure description is saved
+      totalMarks: parseInt(totalMarks),
+      dueDate: new Date(dueDate),
+      submissionsCount: 0,
+      file: req.file ? `/Uploads/${req.file.filename}` : null,
+    });
+
+    await newAssignment.save();
+    res.status(201).json({ message: 'Assignment created successfully', assignment: newAssignment });
+  } catch (error) {
+    console.error('Error creating assignment:', error);
+    res.status(500).json({ message: 'Error creating assignment', error: error.message });
+  }
+});
+
+// Update an assignment
+router.put('/assignments/:assignmentId', authenticateToken, authorizeInstructor, upload.single('file'), async (req, res) => {
+  try {
+    const { title, description, totalMarks, dueDate } = req.body;
+    const assignment = await Assignment.findById(req.params.assignmentId);
+    if (!assignment) {
+      return res.status(404).json({ message: 'Assignment not found' });
+    }
+
+    const course = await CreateCourse.findById(assignment.courseId);
+    if (!course || course.instructorId.toString() !== req.user._id) {
+      return res.status(403).json({ message: 'Unauthorized: You are not the instructor of this course' });
+    }
+
+    if (title) assignment.title = title;
+    if (description !== undefined) assignment.description = description; // Handle empty description
+    if (totalMarks) assignment.totalMarks = parseInt(totalMarks);
+    if (dueDate) assignment.dueDate = new Date(dueDate);
+    if (req.file) assignment.file = `/Uploads/${req.file.filename}`;
+
+    await assignment.save();
+    res.json({ message: 'Assignment updated successfully', assignment });
+  } catch (error) {
+    console.error('Error updating assignment:', error);
+    res.status(500).json({ message: 'Error updating assignment', error: error.message });
+  }
+});
+
+// Delete an assignment
+router.delete('/assignments/:assignmentId', authenticateToken, authorizeInstructor, async (req, res) => {
+  try {
+    const assignment = await Assignment.findById(req.params.assignmentId);
+    if (!assignment) {
+      return res.status(404).json({ message: 'Assignment not found' });
+    }
+
+    const course = await CreateCourse.findById(assignment.courseId);
+    if (!course || course.instructorId.toString() !== req.user._id) {
+      return res.status(403).json({ message: 'Unauthorized: You are not the instructor of this course' });
+    }
+
+    await AssignmentSubmission.deleteMany({ assignmentId: req.params.assignmentId });
+    await assignment.deleteOne();
+    res.json({ message: 'Assignment deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting assignment:', error);
+    res.status(500).json({ message: 'Error deleting assignment', error: error.message });
+  }
+});
+
+// Get submissions for an assignment
+router.get('/assignments/:assignmentId/submissions', authenticateToken, authorizeInstructor, async (req, res) => {
+  try {
+    const assignment = await Assignment.findById(req.params.assignmentId);
+    if (!assignment) {
+      return res.status(404).json({ message: 'Assignment not found' });
+    }
+    const course = await CreateCourse.findById(assignment.courseId);
+    if (!course || course.instructorId.toString() !== req.user._id) {
+      return res.status(403).json({ message: 'Unauthorized: You are not the instructor of this course' });
+    }
+
+    const submissions = await AssignmentSubmission.find({ assignmentId: req.params.assignmentId }).populate(
+      'studentId',
+      'name email'
+    );
+    res.json(submissions);
+  } catch (error) {
+    console.error('Error fetching submissions:', error);
+    res.status(500).json({ message: 'Error fetching submissions', error: error.message });
+  }
+});
+
+// Submit an assignment
+router.post('/assignments/:assignmentId/submissions', authenticateToken, upload.single('file'), async (req, res) => {
+  try {
+    const { studentId, studentName, studentEmail, courseId } = req.body;
+    if (!studentId || !studentName || !studentEmail || !courseId) {
+      return res.status(400).json({ message: 'Student ID, name, email, and course ID are required' });
+    }
+
+    const assignment = await Assignment.findById(req.params.assignmentId);
+    if (!assignment) {
+      return res.status(404).json({ message: 'Assignment not found' });
+    }
+
+    const submission = new AssignmentSubmission({
+      assignmentId: req.params.assignmentId,
+      courseId,
+      studentId,
+      studentName,
+      studentEmail,
+      submittedOn: new Date(),
+      file: req.file ? `/Uploads/${req.file.filename}` : null,
+    });
+
+    await submission.save();
+    await Assignment.findByIdAndUpdate(req.params.assignmentId, { $inc: { submissionsCount: 1 } });
+    res.status(201).json({ message: 'Submission created successfully', submission });
+  } catch (error) {
+    console.error('Error submitting assignment:', error);
+    res.status(500).json({ message: 'Error submitting assignment', error: error.message });
+  }
+});
+
+// Grade a submission
+router.put('/assignment-submissions/:submissionId/grade', authenticateToken, authorizeInstructor, async (req, res) => {
+  try {
+    const { marks } = req.body;
+    const submission = await AssignmentSubmission.findById(req.params.submissionId).populate('assignmentId');
+
+    if (!submission) {
+      return res.status(404).json({ message: 'Submission not found' });
+    }
+
+    if (marks > submission.assignmentId.totalMarks) {
+      return res.status(400).json({ message: `Marks cannot exceed ${submission.assignmentId.totalMarks}` });
+    }
+
+    submission.marks = parseInt(marks);
+    await submission.save();
+    res.json({ message: 'Submission graded successfully', submission });
+  } catch (error) {
+    console.error('Error grading submission:', error);
+    res.status(500).json({ message: 'Error grading submission', error: error.message });
+  }
+});
+
+// Download a submission file
+router.get('/assignment-submissions/:submissionId/download', authenticateToken, async (req, res) => {
+  try {
+    const submission = await AssignmentSubmission.findById(req.params.submissionId);
+    if (!submission || !submission.file) {
+      return res.status(404).json({ message: 'File not found' });
+    }
+
+    const filePath = path.resolve(__dirname, '..', submission.file.replace(/^\//, ''));
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ message: 'File not found on server' });
+    }
+
+    res.download(filePath, `${submission.studentName}_submission${path.extname(submission.file)}`);
+  } catch (error) {
+    console.error('Error downloading file:', error);
+    res.status(500).json({ message: 'Error downloading file', error: error.message });
+  }
+});
+
+module.exports = router;
