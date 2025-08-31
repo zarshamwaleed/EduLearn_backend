@@ -213,6 +213,18 @@ router.put(
     try {
       if (!req.file) return res.status(400).json({ message: "No file uploaded" });
 
+      const uploadFromBuffer = (buffer) =>
+        new Promise((resolve, reject) => {
+          const stream = cloudinary.uploader.upload_stream(
+            { folder: "profile_pics" },
+            (error, result) => {
+              if (error) reject(error);
+              else resolve(result);
+            }
+          );
+          stream.end(buffer);
+        });
+
       const result = await uploadFromBuffer(req.file.buffer);
 
       const user = await User.findByIdAndUpdate(
@@ -239,23 +251,18 @@ router.put(
       const { name, email, bio } = req.body;
 
       let profilePicUrl = null;
-
       if (req.file) {
-        // Helper function to upload buffer to Cloudinary
-        const uploadFromBuffer = (buffer) =>
-          new Promise((resolve, reject) => {
-            const stream = cloudinary.uploader.upload_stream(
-              { folder: "profile_pics" },
-              (error, result) => {
-                if (error) return reject(error);
-                resolve(result);
-              }
-            );
-            stream.end(buffer);
-          });
-
-        // Call the helper to upload the file
-        const result = await uploadFromBuffer(req.file.buffer);
+        // Upload file from buffer
+        const result = await new Promise((resolve, reject) => {
+          const stream = cloudinary.uploader.upload_stream(
+            { folder: "profile_pics" },
+            (error, result) => {
+              if (error) reject(error);
+              else resolve(result);
+            }
+          );
+          stream.end(req.file.buffer);
+        });
         profilePicUrl = result.secure_url;
       }
 
@@ -285,5 +292,4 @@ router.put(
     }
   }
 );
-
 module.exports = router;
