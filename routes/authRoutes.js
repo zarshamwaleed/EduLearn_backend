@@ -6,7 +6,7 @@ const User = require("../models/userModel");
 const validator = require("validator");
 const multer = require("multer");
 const path = require("path");
-
+const cloudinary = require("../utils/cloudinary");
 const { authenticateToken } = require("../middleware/authMiddleware");
 
 
@@ -211,39 +211,24 @@ router.put(
   upload.single("profilePic"),
   async (req, res) => {
     try {
-      let profilePicUrl = null;
+      if (!req.file) return res.status(400).json({ message: "No file uploaded" });
 
-      if (req.file) {
-        // Upload from buffer
-        const result = await new Promise((resolve, reject) => {
-          const stream = cloudinary.uploader.upload_stream(
-            { folder: "profile_pics" },
-            (error, result) => {
-              if (error) reject(error);
-              else resolve(result);
-            }
-          );
-          stream.end(req.file.buffer); // use buffer instead of path
-        });
-
-        profilePicUrl = result.secure_url;
-      }
+      const result = await uploadFromBuffer(req.file.buffer);
 
       const user = await User.findByIdAndUpdate(
         req.user._id,
-        { profilePic: profilePicUrl },
+        { profilePic: result.secure_url },
         { new: true }
       ).select("-password");
 
       res.json(user);
     } catch (error) {
       console.error("Error updating profile picture:", error);
-      res
-        .status(500)
-        .json({ message: "Server error", details: error.message });
+      res.status(500).json({ message: "Server error", details: error.message });
     }
   }
 );
+
 
 router.put(
   "/profile/update",
@@ -254,18 +239,23 @@ router.put(
       const { name, email, bio } = req.body;
 
       let profilePicUrl = null;
+
       if (req.file) {
-        // Upload file from buffer
-        const result = await new Promise((resolve, reject) => {
-          const stream = cloudinary.uploader.upload_stream(
-            { folder: "profile_pics" },
-            (error, result) => {
-              if (error) reject(error);
-              else resolve(result);
-            }
-          );
-          stream.end(req.file.buffer);
-        });
+        // Helper function to upload buffer to Cloudinary
+        const uploadFromBuffer = (buffer) =>
+          new Promise((resolve, reject) => {
+            const stream = cloudinary.uploader.upload_stream(
+              { folder: "profile_pics" },
+              (error, result) => {
+                if (error) return reject(error);
+                resolve(result);
+              }
+            );
+            stream.end(buffer);
+          });
+
+        // Call the helper to upload the file
+        const result = await uploadFromBuffer(req.file.buffer);
         profilePicUrl = result.secure_url;
       }
 
@@ -295,4 +285,5 @@ router.put(
     }
   }
 );
+
 module.exports = router;
