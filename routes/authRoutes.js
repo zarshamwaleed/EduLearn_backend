@@ -6,55 +6,70 @@ const User = require("../models/userModel");
 const validator = require("validator");
 const multer = require("multer");
 const path = require("path");
-const fs = require("fs");
+
 const { authenticateToken } = require("../middleware/authMiddleware");
 
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const uploadDir = "./Uploads/";
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, file.fieldname + "-" + uniqueSuffix + path.extname(file.originalname));
-  },
-});
+
+
+
+// Store files in memory instead of disk
+const storage = multer.memoryStorage();
 
 const upload = multer({
-  storage: storage,
+  storage,
   fileFilter: (req, file, cb) => {
     const filetypes = /jpeg|jpg|png|gif/;
     const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
     const mimetype = filetypes.test(file.mimetype);
     if (extname && mimetype) {
-      return cb(null, true);
+      cb(null, true);
     } else {
-      return cb(new Error("Only image files are allowed"));
+      cb(new Error("Only image files are allowed"));
     }
   },
 });
 
+module.exports = upload;
+
 router.post("/signup", upload.single("profilePic"), async (req, res) => {
-  const { name, email, phone, password, confirmPassword, role, bio } = req.body;
-
-  const profilePic = req.file ? req.file.path.replace("\\", "/") : "";
-
-  if (!name || !email || !password || !role) {
-    return res.status(400).json({ message: "Please fill all the required fields" });
-  }
-
-  if (!validator.isEmail(email)) {
-    return res.status(400).json({ message: "Invalid email format" });
-  }
-
-  if (password !== confirmPassword) {
-    return res.status(400).json({ message: "Passwords do not match" });
-  }
-
   try {
+    const { name, email, phone, password, confirmPassword, role, bio } = req.body;
+    const cloudinary = require("../utils/cloudinary");
+
+    let profilePicUrl = "";
+
+    if (req.file) {
+      try {
+        const uploadResult = await new Promise((resolve, reject) => {
+          const stream = cloudinary.uploader.upload_stream(
+            { folder: "profile_pics" },
+            (error, result) => {
+              if (error) reject(error);
+              else resolve(result);
+            }
+          );
+          stream.end(req.file.buffer);
+        });
+
+        profilePicUrl = uploadResult.secure_url; // ✅ ab safe hai
+      } catch (err) {
+        console.error("Cloudinary upload error:", err);
+        return res.status(500).json({ message: "Error uploading profile picture" });
+      }
+    }
+
+    if (!name || !email || !password || !role) {
+      return res.status(400).json({ message: "Please fill all the required fields" });
+    }
+
+    if (!validator.isEmail(email)) {
+      return res.status(400).json({ message: "Invalid email format" });
+    }
+
+    if (password !== confirmPassword) {
+      return res.status(400).json({ message: "Passwords do not match" });
+    }
+
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ message: "Email is already taken" });
@@ -69,9 +84,9 @@ router.post("/signup", upload.single("profilePic"), async (req, res) => {
       phone,
       password: hashedPassword,
       role,
-      profilePic,
+      profilePic: profilePicUrl,
       bio,
-      enrolledCourses: [], // Initialize empty enrolledCourses
+      enrolledCourses: [],
     });
 
     await newUser.save();
@@ -82,6 +97,7 @@ router.post("/signup", upload.single("profilePic"), async (req, res) => {
     return res.status(500).json({ message: "Server error", details: error.message });
   }
 });
+
 
 router.post("/signin", async (req, res) => {
   const { email, password } = req.body;
@@ -195,29 +211,36 @@ router.put(
   upload.single("profilePic"),
   async (req, res) => {
     try {
-      const profilePic = req.file ? req.file.path.replace("\\", "/") : null;
-      const user = await User.findByIdAndUpdate(
-        req.user._id,
-        { profilePic },
-        { new: true }
-      ).select('-password');
+      let profilePicUrl = null;
 
-      if (!user) {
-        return res.status(404).json({ message: "User not found" });
+      if (req.file) {
+        // Upload from buffer
+        const result = await new Promise((resolve, reject) => {
+          const stream = cloudinary.uploader.upload_stream(
+            { folder: "profile_pics" },
+            (error, result) => {
+              if (error) reject(error);
+              else resolve(result);
+            }
+          );
+          stream.end(req.file.buffer); // use buffer instead of path
+        });
+
+        profilePicUrl = result.secure_url;
       }
 
-      res.json({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        profilePic: user.profilePic,
-        bio: user.bio,
-        role: user.role,
-        enrolledCourses: user.enrolledCourses,
-      });
+      const user = await User.findByIdAndUpdate(
+        req.user._id,
+        { profilePic: profilePicUrl },
+        { new: true }
+      ).select("-password");
+
+      res.json(user);
     } catch (error) {
       console.error("Error updating profile picture:", error);
-      res.status(500).json({ message: "Server error", details: error.message });
+      res
+        .status(500)
+        .json({ message: "Server error", details: error.message });
     }
   }
 );
@@ -229,14 +252,29 @@ router.put(
   async (req, res) => {
     try {
       const { name, email, bio } = req.body;
-      const profilePic = req.file ? req.file.path.replace("\\", "/") : null;
+
+      let profilePicUrl = null;
+      if (req.file) {
+        // Upload file from buffer
+        const result = await new Promise((resolve, reject) => {
+          const stream = cloudinary.uploader.upload_stream(
+            { folder: "profile_pics" },
+            (error, result) => {
+              if (error) reject(error);
+              else resolve(result);
+            }
+          );
+          stream.end(req.file.buffer);
+        });
+        profilePicUrl = result.secure_url;
+      }
 
       const updateData = { name, email, bio };
-      if (profilePic) updateData.profilePic = profilePic;
+      if (profilePicUrl) updateData.profilePic = profilePicUrl;
 
       const user = await User.findByIdAndUpdate(req.user._id, updateData, {
         new: true,
-      }).select('-password');
+      }).select("-password");
 
       if (!user) {
         return res.status(404).json({ message: "User not found" });
@@ -257,5 +295,4 @@ router.put(
     }
   }
 );
-
 module.exports = router;

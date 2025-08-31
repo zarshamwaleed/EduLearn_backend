@@ -9,15 +9,23 @@ const CreateCourse = require('../models/CreateCourse');
 const fs = require('fs');
 
 // Configure multer for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'Uploads/');
-  },
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
+const storage = multer.memoryStorage();
+
+const upload = multer({
+  storage,
+  fileFilter: (req, file, cb) => {
+    const filetypes = /jpeg|jpg|png|gif/;
+    const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = filetypes.test(file.mimetype);
+    if (extname && mimetype) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only image files are allowed"));
+    }
   },
 });
-const upload = multer({ storage });
+
+module.exports = upload;
 
 // Get all assignments for a course (for instructors or general)
 router.get('/courses/:courseId/assignments', authenticateToken, async (req, res) => {

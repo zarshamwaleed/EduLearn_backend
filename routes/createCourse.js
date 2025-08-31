@@ -9,16 +9,24 @@ const {
 } = require("../middleware/authMiddleware");
 
 // Multer storage setup
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "Uploads/");
-  },
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, Date.now() + ext);
+const storage = multer.memoryStorage(); // keep file in memory
+const upload = multer({
+  storage,
+  fileFilter: (req, file, cb) => {
+    const filetypes = /jpeg|jpg|png|gif/;
+    const extname = filetypes.test(
+      path.extname(file.originalname).toLowerCase()
+    );
+    const mimetype = filetypes.test(file.mimetype);
+    if (extname && mimetype) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only image files are allowed"));
+    }
   },
 });
-const upload = multer({ storage });
+
+module.exports = upload;
 
 // Create course - only instructor can access
 router.post(

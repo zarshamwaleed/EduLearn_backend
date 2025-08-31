@@ -2,62 +2,31 @@ const express = require("express");
 const router = express.Router();
 const multer = require("multer");
 const path = require("path");
-const fs = require("fs");
+
 const FileUpload = require("../models/FileUpload");
 const CreateCourse = require("../models/CreateCourse");
 const User = require("../models/userModel");
 const { authenticateToken, authorizeInstructor } = require("../middleware/authMiddleware");
 
 // Configure Multer storage
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadDir = "Uploads/";
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueName = `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname)}`;
-    cb(null, uniqueName);
-  },
-});
-
+const storage = multer.memoryStorage(); // store files in memory
 const upload = multer({
   storage,
   fileFilter: (req, file, cb) => {
-    const allowedTypes = {
-      file: [/.*/],
-      pdf: ["application/pdf"],
-      image: ["image/jpeg", "image/png", "image/gif"],
-      video: ["video/mp4", "video/avi"],
-      audio: ["audio/mpeg", "audio/wav"],
-      presentation: [
-        "application/vnd.ms-powerpoint",
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-      ],
-      spreadsheet: [
-        "application/vnd.ms-excel",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      ],
-      document: [
-        "application/msword",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      ],
-      ebook: ["application/epub+zip", "application/x-mobipocket-ebook"],
-    };
-
-    const contentType = req.body.contentType || "file";
-    const allowedMimes = allowedTypes[contentType] || [/.*/];
-
-    if (allowedMimes.some((regex) => regex.test(file.mimetype))) {
-      cb(null, true);
+    const filetypes = /jpeg|jpg|png|gif/;
+    const extname = filetypes.test(
+      path.extname(file.originalname).toLowerCase()
+    );
+    const mimetype = filetypes.test(file.mimetype);
+    if (extname && mimetype) {
+      return cb(null, true);
     } else {
-      cb(new Error(`Invalid file type for ${contentType}.`));
+      return cb(new Error("Only image files are allowed"));
     }
   },
-  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB limit
 });
+
+module.exports = upload;
 
 // @route   POST /api/upload/:courseId
 // @desc    Upload file for a course
@@ -85,15 +54,29 @@ router.post(
         return res.status(400).json({ error: "No file uploaded" });
       }
 
-      const fileUrl = `/Uploads/${req.file.filename}`.replace(/\\/g, "/");
+  let fileUrl = "";
+if (req.file) {
+  const result = await new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder: "course_files" },
+      (error, result) => {
+        if (error) reject(error);
+        else resolve(result);
+      }
+    );
+    stream.end(req.file.buffer);
+  });
+  fileUrl = result.secure_url;
+}
 
-      const newFile = new FileUpload({
-        courseId,
-        fileName: req.file.originalname,
-        fileUrl,
-        contentType: contentType || "file",
-        uploadedBy,
-      });
+
+    const newFile = new FileUpload({
+  courseId,
+  fileName: req.file.originalname,
+  fileUrl, // from Cloudinary
+  contentType: contentType || "file",
+  uploadedBy,
+});
 
       await newFile.save();
 
@@ -186,11 +169,7 @@ router.delete(
         return res.status(404).json({ error: "Content not found" });
       }
 
-      // Delete file from filesystem
-      const filePath = path.join(__dirname, "..", content.fileUrl.replace(/^\//, ""));
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
+     
 
       await FileUpload.deleteOne({ _id: contentId });
 
