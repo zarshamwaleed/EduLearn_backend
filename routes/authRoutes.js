@@ -42,7 +42,7 @@ router.post("/signup", upload.single("profilePic"), async (req, res) => {
       try {
         const uploadResult = await new Promise((resolve, reject) => {
           const stream = cloudinary.uploader.upload_stream(
-            { folder: "profile_pics" },
+            { folder: "profile_pics", resource_type: "auto" },
             (error, result) => {
               if (error) reject(error);
               else resolve(result);
@@ -216,7 +216,7 @@ router.put(
       const uploadFromBuffer = (buffer) =>
         new Promise((resolve, reject) => {
           const stream = cloudinary.uploader.upload_stream(
-            { folder: "profile_pics" },
+            { folder: "profile_pics" , resource_type: "auto"},
             (error, result) => {
               if (error) reject(error);
               else resolve(result);
@@ -255,7 +255,7 @@ router.put(
         // Upload file from buffer
         const result = await new Promise((resolve, reject) => {
           const stream = cloudinary.uploader.upload_stream(
-            { folder: "profile_pics" },
+            { folder: "profile_pics", resource_type: "auto" },
             (error, result) => {
               if (error) reject(error);
               else resolve(result);

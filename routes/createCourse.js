@@ -13,15 +13,16 @@ const storage = multer.memoryStorage(); // keep file in memory
 const upload = multer({
   storage,
   fileFilter: (req, file, cb) => {
-    const filetypes = /jpeg|jpg|png|gif/;
+    const filetypes = /jpeg|jpg|png|gif|pdf|mp4|mp3|ppt|pptx|xls|xlsx|doc|docx|txt/;
     const extname = filetypes.test(
       path.extname(file.originalname).toLowerCase()
     );
-    const mimetype = filetypes.test(file.mimetype);
+    const mimetype = filetypes.test(file.mimetype.toLowerCase());
+
     if (extname && mimetype) {
       cb(null, true);
     } else {
-      cb(new Error("Only image files are allowed"));
+      cb(new Error("File type not allowed"), false);
     }
   },
 });
