@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const multer = require("multer");
 const path = require("path");
-
+const cloudinary = require("../utils/cloudinary");
 const FileUpload = require("../models/FileUpload");
 const CreateCourse = require("../models/CreateCourse");
 const User = require("../models/userModel");
@@ -26,7 +26,7 @@ const upload = multer({
   },
 });
 
-module.exports = upload;
+// ❌ remove: module.exports = upload;
 
 // @route   POST /api/upload/:courseId
 // @desc    Upload file for a course
@@ -54,29 +54,28 @@ router.post(
         return res.status(400).json({ error: "No file uploaded" });
       }
 
-  let fileUrl = "";
-if (req.file) {
-  const result = await new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
-      { folder: "course_files" },
-      (error, result) => {
-        if (error) reject(error);
-        else resolve(result);
+      let fileUrl = "";
+      if (req.file) {
+        const result = await new Promise((resolve, reject) => {
+          const stream = cloudinary.uploader.upload_stream(
+            { folder: "course_files" },
+            (error, result) => {
+              if (error) reject(error);
+              else resolve(result);
+            }
+          );
+          stream.end(req.file.buffer);
+        });
+        fileUrl = result.secure_url;
       }
-    );
-    stream.end(req.file.buffer);
-  });
-  fileUrl = result.secure_url;
-}
 
-
-    const newFile = new FileUpload({
-  courseId,
-  fileName: req.file.originalname,
-  fileUrl, // from Cloudinary
-  contentType: contentType || "file",
-  uploadedBy,
-});
+      const newFile = new FileUpload({
+        courseId,
+        fileName: req.file.originalname,
+        fileUrl, // from Cloudinary
+        contentType: contentType || "file",
+        uploadedBy,
+      });
 
       await newFile.save();
 
@@ -86,7 +85,7 @@ if (req.file) {
           _id: newFile._id,
           courseId,
           fileName: newFile.fileName,
-          fileUrl: `${req.protocol}://${req.get("host")}${fileUrl}`,
+          fileUrl, // ✅ already secure Cloudinary URL
           contentType: newFile.contentType,
           uploadedBy,
           uploadedAt: newFile.uploadedAt,
@@ -134,7 +133,7 @@ router.get("/:courseId", authenticateToken, async (req, res) => {
         content_id: content._id,
         content_type: content.contentType,
         file_name: content.fileName,
-        file_url: `${req.protocol}://${req.get("host")}${content.fileUrl}`,
+        file_url: content.fileUrl, // ✅ already secure Cloudinary URL
         uploaded_at: content.uploadedAt,
       }))
     );
@@ -168,8 +167,6 @@ router.delete(
       if (!content) {
         return res.status(404).json({ error: "Content not found" });
       }
-
-     
 
       await FileUpload.deleteOne({ _id: contentId });
 
