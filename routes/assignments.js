@@ -381,7 +381,8 @@ router.put('/assignment-submissions/:submissionId/grade', authenticateToken, aut
   }
 });
 
-router.get("/:submissionId/download", async (req, res) => {
+router.get("/assignment-submissions/:submissionId/download", async (req, res) => {
+
   try {
     console.log("📥 Download request received:", req.params.submissionId);
 
