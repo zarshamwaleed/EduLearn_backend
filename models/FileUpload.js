@@ -14,6 +14,17 @@ const fileUploadSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  publicId: {             // ✅ NEW FIELD (Cloudinary public_id)
+    type: String,
+    required: true,
+  },
+  format: {               // ✅ NEW FIELD (Cloudinary format)
+    type: String,
+  },
+  resourceType: {         // ✅ NEW FIELD (Cloudinary resource_type)
+    type: String,
+    default: "raw",       // "raw" is safe for docs/pdf/ppt etc.
+  },
   contentType: {
     type: String,
     enum: [

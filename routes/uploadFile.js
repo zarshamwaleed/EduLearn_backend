@@ -68,14 +68,17 @@ router.post(
 fileUrl = result.secure_url; // save this in DB
       }
 
- const newFile = new FileUpload({
+const newFile = new FileUpload({
   courseId,
   fileName: req.file.originalname,
   fileUrl: result.secure_url,
-  publicId: result.public_id, // ✅ store public_id
+  publicId: result.public_id,         // ✅ already correct
+  format: result.format,              // ✅ ADD THIS
+  resourceType: result.resource_type, // ✅ ADD THIS
   contentType: contentType || "file",
   uploadedBy,
 });
+
 
 
       await newFile.save();
@@ -183,22 +186,27 @@ router.get("/:courseId/download/:fileId", authenticateToken, async (req, res) =>
     const file = await FileUpload.findById(req.params.fileId);
     if (!file) return res.status(404).json({ error: "File not found" });
 
-    // Signed URL generate karo
+    if (!file.publicId) {
+      return res.status(400).json({ error: "File is missing public_id in DB" });
+    }
+
     const signedUrl = cloudinary.utils.private_download_url(
-      file.publicId, 
-      file.fileName.split(".").pop(),
+      file.publicId,
+      file.format || "pdf", // ✅ safer than guessing from filename
       {
         type: "authenticated",
-        expires_at: Math.floor(Date.now() / 1000) + 300, // 5 min expiry
+        resource_type: file.resourceType || "raw", // ✅ ensures correct download
+        expires_at: Math.floor(Date.now() / 1000) + 300,
       }
     );
 
-    return res.json({ signedUrl }); // ✅ better than redirect
+    return res.json({ signedUrl });
   } catch (error) {
     console.error("Download error:", error);
     res.status(500).json({ error: "Server error while downloading" });
   }
 });
+
 
 
 router.use((err, req, res, next) => {
