@@ -10,6 +10,7 @@ const assignmentSubmissionSchema = new mongoose.Schema({
   marks: { type: Number },
   file: { type: String },          // Secure URL from Cloudinary
   cloudinaryId: { type: String },  // 👈 NEW: public_id for signed download
+  resourceType: { type: String }, 
 });
 
 const assignmentSchema = new mongoose.Schema({
