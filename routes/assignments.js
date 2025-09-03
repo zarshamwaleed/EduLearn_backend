@@ -7,6 +7,7 @@ const path = require('path');
 const { authenticateToken, authorizeInstructor } = require('../middleware/authMiddleware');
 const CreateCourse = require('../models/CreateCourse');
 const fs = require('fs');
+const cloudinary = require("../utils/cloudinary");
 
 // Configure multer for file uploads
 const storage = multer.memoryStorage();
@@ -195,15 +196,35 @@ router.post('/courses/:courseId/assignments', authenticateToken, authorizeInstru
       return res.status(403).json({ message: 'Unauthorized: You are not the instructor of this course' });
     }
 
-    const newAssignment = new Assignment({
-      courseId: req.params.courseId,
-      title,
-      description: description || '', // Ensure description is saved
-      totalMarks: parseInt(totalMarks),
-      dueDate: new Date(dueDate),
-      submissionsCount: 0,
-      file: req.file ? `/Uploads/${req.file.filename}` : null,
-    });
+let fileUrl = null;
+let publicId = null;
+
+if (req.file) {
+  const result = await new Promise((resolve, reject) => {
+    cloudinary.uploader.upload_stream(
+      { folder: "assignments" },
+      (error, result) => {
+        if (error) reject(error);
+        else resolve(result);
+      }
+    ).end(req.file.buffer);
+  });
+
+  fileUrl = result.secure_url;
+  publicId = result.public_id;
+}
+
+const newAssignment = new Assignment({
+  courseId: req.params.courseId,
+  title,
+  description: description || '',
+  totalMarks: parseInt(totalMarks),
+  dueDate: new Date(dueDate),
+  submissionsCount: 0,
+  file: fileUrl,
+  cloudinaryId: publicId, // 👈 add this field in schema if not already
+});
+
 
     await newAssignment.save();
     res.status(201).json({ message: 'Assignment created successfully', assignment: newAssignment });
@@ -299,15 +320,34 @@ router.post('/assignments/:assignmentId/submissions', authenticateToken, upload.
       return res.status(404).json({ message: 'Assignment not found' });
     }
 
-    const submission = new AssignmentSubmission({
-      assignmentId: req.params.assignmentId,
-      courseId,
-      studentId,
-      studentName,
-      studentEmail,
-      submittedOn: new Date(),
-      file: req.file ? `/Uploads/${req.file.filename}` : null,
-    });
+let fileUrl = null;
+let publicId = null;
+
+if (req.file) {
+  const result = await new Promise((resolve, reject) => {
+    cloudinary.uploader.upload_stream(
+      { folder: "submissions" },
+      (error, result) => {
+        if (error) reject(error);
+        else resolve(result);
+      }
+    ).end(req.file.buffer);
+  });
+
+  fileUrl = result.secure_url;
+  publicId = result.public_id;
+}
+
+const submission = new AssignmentSubmission({
+  assignmentId: req.params.assignmentId,
+  courseId,
+  studentId,
+  studentName,
+  studentEmail,
+  submittedOn: new Date(),
+  file: fileUrl,
+  cloudinaryId: publicId, // 👈 store for later delete
+});
 
     await submission.save();
     await Assignment.findByIdAndUpdate(req.params.assignmentId, { $inc: { submissionsCount: 1 } });
@@ -342,23 +382,20 @@ router.put('/assignment-submissions/:submissionId/grade', authenticateToken, aut
 });
 
 // Download a submission file
-router.get('/assignment-submissions/:submissionId/download', authenticateToken, async (req, res) => {
+router.get('/:submissionId/download', async (req, res) => {
   try {
     const submission = await AssignmentSubmission.findById(req.params.submissionId);
     if (!submission || !submission.file) {
       return res.status(404).json({ message: 'File not found' });
     }
 
-    const filePath = path.resolve(__dirname, '..', submission.file.replace(/^\//, ''));
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ message: 'File not found on server' });
-    }
-
-    res.download(filePath, `${submission.studentName}_submission${path.extname(submission.file)}`);
+    // Redirect to cloudinary file
+    return res.redirect(submission.file);
   } catch (error) {
     console.error('Error downloading file:', error);
-    res.status(500).json({ message: 'Error downloading file', error: error.message });
+    res.status(500).json({ message: 'Error downloading file' });
   }
 });
+
 
 module.exports = router;
