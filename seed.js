@@ -14,7 +14,7 @@ const seedData = async () => {
     if (!instructor) {
       throw new Error("Instructor not found");
     }
-    console.log("Instructor found:", instructor.email);
+    // console.log("Instructor found:", instructor.email);
 
     // Course IDs as ObjectIds
     const courseIds = [
@@ -31,11 +31,11 @@ const seedData = async () => {
     if (courses.length !== 3) {
       throw new Error("Not all courses found");
     }
-    console.log("Courses verified:", courses.map(c => c.title));
+    // console.log("Courses verified:", courses.map(c => c.title));
 
     // Delete existing CourseProgress
     await CourseProgress.deleteMany({ courseId: { $in: courseIds } });
-    console.log("Cleared existing CourseProgress");
+    // console.log("Cleared existing CourseProgress");
 
     // Create or update students
     let student1 = await User.findOne({ email: "student1@example.com" });
@@ -51,13 +51,13 @@ const seedData = async () => {
         role: "student",
         enrolledCourses: courseIdsAsStrings, // Use strings
       });
-      console.log("Created Student 1");
+      // console.log("Created Student 1");
     } else {
       await User.updateOne(
         { _id: student1._id },
         { $set: { enrolledCourses: courseIdsAsStrings } } // Use strings
       );
-      console.log("Updated Student 1");
+      // console.log("Updated Student 1");
     }
 
     if (!student2) {
@@ -68,13 +68,13 @@ const seedData = async () => {
         role: "student",
         enrolledCourses: courseIdsAsStrings, // Use strings
       });
-      console.log("Created Student 2");
+      // console.log("Created Student 2");
     } else {
       await User.updateOne(
         { _id: student2._id },
         { $set: { enrolledCourses: courseIdsAsStrings } } // Use strings
       );
-      console.log("Updated Student 2");
+      // console.log("Updated Student 2");
     }
 
     // Create CourseProgress entries (these use ObjectIds as expected)
@@ -108,12 +108,12 @@ const seedData = async () => {
         updatedAt: new Date(),
       },
     ]);
-    console.log("Created 4 CourseProgress entries");
+    // console.log("Created 4 CourseProgress entries");
 
-    console.log("Database seeded successfully");
+    // console.log("Database seeded successfully");
     mongoose.disconnect();
   } catch (error) {
-    console.error("Error seeding database:", error);
+    // console.error("Error seeding database:", error);
     mongoose.disconnect();
   }
 };
