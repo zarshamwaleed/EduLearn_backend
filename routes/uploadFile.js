@@ -53,33 +53,34 @@ router.post(
         return res.status(400).json({ error: "No file uploaded" });
       }
 
-      let fileUrl = "";
-      if (req.file) {
-     const result = await new Promise((resolve, reject) => {
-  const stream = cloudinary.uploader.upload_stream(
-    { folder: "course_files", resource_type: "auto", type: "authenticated" }, // ✅
-    (error, result) => {
-      if (error) reject(error);
-      else resolve(result);
-    }
-  );
-  stream.end(req.file.buffer);
-});
-fileUrl = result.secure_url; // save this in DB
+      // ✅ Declare result outside so we can use it later
+      let result;
+      try {
+        result = await new Promise((resolve, reject) => {
+          const stream = cloudinary.uploader.upload_stream(
+            { folder: "course_files", resource_type: "auto", type: "authenticated" },
+            (error, result) => {
+              if (error) reject(error);
+              else resolve(result);
+            }
+          );
+          stream.end(req.file.buffer);
+        });
+      } catch (err) {
+        console.error("Cloudinary upload failed:", err);
+        return res.status(500).json({ error: "Failed to upload file to Cloudinary" });
       }
 
-const newFile = new FileUpload({
-  courseId,
-  fileName: req.file.originalname,
-  fileUrl: result.secure_url,
-  publicId: result.public_id,         // ✅ already correct
-  format: result.format,              // ✅ ADD THIS
-  resourceType: result.resource_type, // ✅ ADD THIS
-  contentType: contentType || "file",
-  uploadedBy,
-});
-
-
+      const newFile = new FileUpload({
+        courseId,
+        fileName: req.file.originalname,
+        fileUrl: result.secure_url,
+        publicId: result.public_id,      // ✅ Will now work
+        format: result.format,           // ✅ Optional but useful
+        resourceType: result.resource_type || "raw", 
+        contentType: contentType || "file",
+        uploadedBy,
+      });
 
       await newFile.save();
 
@@ -89,7 +90,7 @@ const newFile = new FileUpload({
           _id: newFile._id,
           courseId,
           fileName: newFile.fileName,
-          fileUrl, // ✅ already secure Cloudinary URL
+          fileUrl: newFile.fileUrl,
           contentType: newFile.contentType,
           uploadedBy,
           uploadedAt: newFile.uploadedAt,
@@ -97,16 +98,11 @@ const newFile = new FileUpload({
       });
     } catch (error) {
       console.error("Upload error:", error);
-      if (error.name === "ValidationError") {
-        return res.status(400).json({ error: `Validation error: ${error.message}` });
-      }
-      if (error.message.includes("Invalid file type")) {
-        return res.status(400).json({ error: error.message });
-      }
       res.status(500).json({ error: "Server error while uploading file", details: error.message });
     }
   }
 );
+
 
 // @route   GET /api/upload/:courseId
 // @desc    Get all content for a course
