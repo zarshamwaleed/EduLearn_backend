@@ -181,58 +181,70 @@ router.get('/assignments/:assignmentId/download', authenticateToken, async (req,
 });
 
 // Create a new assignment
-router.post('/courses/:courseId/assignments', authenticateToken, authorizeInstructor, upload.single('file'), async (req, res) => {
-  try {
-    const { title, description, totalMarks, dueDate } = req.body;
-    if (!title || !totalMarks || !dueDate) {
-      return res.status(400).json({ message: 'Title, total marks, and due date are required' });
-    }
+router.post(
+  '/courses/:courseId/assignments',
+  authenticateToken,
+  authorizeInstructor,
+  upload.single('file'),
+  async (req, res) => {
+    try {
+      const { title, description, totalMarks, dueDate } = req.body;
 
-    const course = await CreateCourse.findById(req.params.courseId);
-    if (!course) {
-      return res.status(404).json({ message: 'Course not found' });
-    }
-    if (course.instructorId.toString() !== req.user._id) {
-      return res.status(403).json({ message: 'Unauthorized: You are not the instructor of this course' });
-    }
-
-let fileUrl = null;
-let publicId = null;
-
-if (req.file) {
-  const result = await new Promise((resolve, reject) => {
-    cloudinary.uploader.upload_stream(
-      { folder: "assignments" },
-      (error, result) => {
-        if (error) reject(error);
-        else resolve(result);
+      if (!title || !totalMarks || !dueDate) {
+        return res.status(400).json({ message: 'Title, total marks, and due date are required' });
       }
-    ).end(req.file.buffer);
-  });
 
-  fileUrl = result.secure_url;
-  publicId = result.public_id;
-}
+      const course = await CreateCourse.findById(req.params.courseId);
+      if (!course) {
+        return res.status(404).json({ message: 'Course not found' });
+      }
+      if (course.instructorId.toString() !== req.user._id) {
+        return res.status(403).json({ message: 'Unauthorized: You are not the instructor of this course' });
+      }
 
-const newAssignment = new Assignment({
-  courseId: req.params.courseId,
-  title,
-  description: description || '',
-  totalMarks: parseInt(totalMarks),
-  dueDate: new Date(dueDate),
-  submissionsCount: 0,
-  file: fileUrl,
-  cloudinaryId: publicId, // 👈 add this field in schema if not already
-});
+      let fileUrl = null;
+      let publicId = null;
 
+      if (req.file) {
+        const result = await new Promise((resolve, reject) => {
+          cloudinary.uploader.upload_stream(
+            {
+              folder: "assignments",
+              resource_type: "auto", // 👈 detects whether it's image/video/raw
+            },
+            (error, result) => {
+              if (error) reject(error);
+              else resolve(result);
+            }
+          ).end(req.file.buffer);
+        });
 
-    await newAssignment.save();
-    res.status(201).json({ message: 'Assignment created successfully', assignment: newAssignment });
-  } catch (error) {
-    console.error('Error creating assignment:', error);
-    res.status(500).json({ message: 'Error creating assignment', error: error.message });
+        fileUrl = result.secure_url;
+        publicId = result.public_id;
+      }
+
+      const newAssignment = new Assignment({
+        courseId: req.params.courseId,
+        title,
+        description: description || '',
+        totalMarks: parseInt(totalMarks),
+        dueDate: new Date(dueDate),
+        submissionsCount: 0,
+        file: fileUrl,
+        cloudinaryId: publicId, // store public_id for private download
+      });
+
+      await newAssignment.save();
+      res.status(201).json({
+        message: 'Assignment created successfully',
+        assignment: newAssignment,
+      });
+    } catch (error) {
+      console.error('Error creating assignment:', error);
+      res.status(500).json({ message: 'Error creating assignment', error: error.message });
+    }
   }
-});
+);
 
 // Update an assignment
 router.put('/assignments/:assignmentId', authenticateToken, authorizeInstructor, upload.single('file'), async (req, res) => {
@@ -308,55 +320,89 @@ router.get('/assignments/:assignmentId/submissions', authenticateToken, authoriz
 });
 
 // Submit an assignment
-router.post('/assignments/:assignmentId/submissions', authenticateToken, upload.single('file'), async (req, res) => {
-  try {
-    const { studentId, studentName, studentEmail, courseId } = req.body;
-    if (!studentId || !studentName || !studentEmail || !courseId) {
-      return res.status(400).json({ message: 'Student ID, name, email, and course ID are required' });
-    }
+router.post(
+  '/assignments/:assignmentId/submissions',
+  authenticateToken,
+  upload.single('file'),
+  async (req, res) => {
+    try {
+      const { studentId, studentName, studentEmail, courseId } = req.body;
 
-    const assignment = await Assignment.findById(req.params.assignmentId);
-    if (!assignment) {
-      return res.status(404).json({ message: 'Assignment not found' });
-    }
-
-let fileUrl = null;
-let publicId = null;
-
-if (req.file) {
-  const result = await new Promise((resolve, reject) => {
-    cloudinary.uploader.upload_stream(
-      { folder: "submissions" },
-      (error, result) => {
-        if (error) reject(error);
-        else resolve(result);
+      // ✅ Validate required fields
+      if (!studentId || !studentName || !studentEmail || !courseId) {
+        return res.status(400).json({
+          message: 'Student ID, name, email, and course ID are required',
+        });
       }
-    ).end(req.file.buffer);
-  });
 
-  fileUrl = result.secure_url;
-  publicId = result.public_id;
-}
+      // ✅ Validate assignment exists
+      const assignment = await Assignment.findById(req.params.assignmentId);
+      if (!assignment) {
+        return res.status(404).json({ message: 'Assignment not found' });
+      }
 
-const submission = new AssignmentSubmission({
-  assignmentId: req.params.assignmentId,
-  courseId,
-  studentId,
-  studentName,
-  studentEmail,
-  submittedOn: new Date(),
-  file: fileUrl,
-  cloudinaryId: publicId, // 👈 store for later delete
-});
+      let fileUrl = null;
+      let publicId = null;
 
-    await submission.save();
-    await Assignment.findByIdAndUpdate(req.params.assignmentId, { $inc: { submissionsCount: 1 } });
-    res.status(201).json({ message: 'Submission created successfully', submission });
-  } catch (error) {
-    console.error('Error submitting assignment:', error);
-    res.status(500).json({ message: 'Error submitting assignment', error: error.message });
+      // ✅ Upload file to Cloudinary if present
+      if (req.file) {
+        try {
+          const result = await new Promise((resolve, reject) => {
+            cloudinary.uploader
+              .upload_stream(
+                { folder: 'submissions', resource_type: 'auto' },
+                (error, result) => {
+                  if (error) reject(error);
+                  else resolve(result);
+                }
+              )
+              .end(req.file.buffer);
+          });
+
+          fileUrl = result.secure_url;
+          publicId = result.public_id;
+        } catch (uploadError) {
+          console.error('Cloudinary upload failed:', uploadError);
+          return res.status(500).json({
+            message: 'Failed to upload file to Cloudinary',
+            error: uploadError.message,
+          });
+        }
+      }
+
+      // ✅ Create new submission document
+      const submission = new AssignmentSubmission({
+        assignmentId: req.params.assignmentId,
+        courseId,
+        studentId,
+        studentName,
+        studentEmail,
+        submittedOn: new Date(),
+        file: fileUrl,
+        cloudinaryId: publicId, // ✅ store for delete/download
+      });
+
+      await submission.save();
+
+      // ✅ Increment submissionsCount
+      await Assignment.findByIdAndUpdate(req.params.assignmentId, {
+        $inc: { submissionsCount: 1 },
+      });
+
+      res.status(201).json({
+        message: 'Submission created successfully',
+        submission,
+      });
+    } catch (error) {
+      console.error('Error submitting assignment:', error);
+      res.status(500).json({
+        message: 'Error submitting assignment',
+        error: error.message,
+      });
+    }
   }
-});
+);
+
 
 // Grade a submission
 router.put('/assignment-submissions/:submissionId/grade', authenticateToken, authorizeInstructor, async (req, res) => {
