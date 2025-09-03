@@ -381,33 +381,47 @@ router.put('/assignment-submissions/:submissionId/grade', authenticateToken, aut
   }
 });
 
-// Download a submission file (with signed Cloudinary URL)
-router.get('/:submissionId/download', async (req, res) => {
+router.get("/:submissionId/download", async (req, res) => {
   try {
+    console.log("📥 Download request received:", req.params.submissionId);
+
     const submission = await AssignmentSubmission.findById(req.params.submissionId);
+
     if (!submission) {
-      return res.status(404).json({ message: 'Submission not found' });
+      console.log("❌ No submission found for this ID");
+      return res.status(404).json({ message: "Submission not found" });
     }
 
     if (!submission.cloudinaryId) {
-      return res.status(400).json({ message: 'Cloudinary public_id missing for this file' });
+      console.log("⚠️ No Cloudinary public_id stored in DB for this file");
+      return res.status(400).json({ message: "File missing Cloudinary ID" });
     }
 
-    // Extract file format from stored file URL (pdf, docx, etc.)
-    const fileFormat = submission.file?.split('.').pop() || 'pdf';
+    // Extract file extension from file URL (e.g. pdf, docx)
+    let fileFormat = "pdf"; // fallback
+    if (submission.file) {
+      const parts = submission.file.split(".");
+      if (parts.length > 1) {
+        fileFormat = parts.pop();
+      }
+    }
 
-    // Generate a signed, expiring download URL
+    // ✅ Generate a signed private URL
     const signedUrl = cloudinary.utils.private_download_url(
       submission.cloudinaryId,
       fileFormat,
-      { type: 'authenticated', expires_at: Math.floor(Date.now() / 1000) + 300 } // expires in 5 minutes
+      {
+        type: "authenticated", // makes it private
+        expires_at: Math.floor(Date.now() / 1000) + 300, // expires in 5 minutes
+      }
     );
 
-    // Return signed URL to frontend
+    console.log("✅ Signed URL generated successfully");
+
     return res.json({ signedUrl });
   } catch (error) {
-    console.error('Error generating signed download URL:', error);
-    res.status(500).json({ message: 'Error downloading file' });
+    console.error("🚨 Error generating signed download URL:", error);
+    res.status(500).json({ message: "Error downloading file" });
   }
 });
 
