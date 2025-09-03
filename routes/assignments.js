@@ -450,16 +450,15 @@ router.get("/assignment-submissions/:submissionId/download", async (req, res) =>
     // File extension (for naming)
     const fileFormat = submission.file?.split(".").pop() || undefined;
 
-   const signedUrl = cloudinary.utils.private_download_url(
-  submission.cloudinaryId,
-  fileFormat,
-  {
-    resource_type: submission.resourceType || "raw", // 👈 use DB value first
-    type: "authenticated",
-    expires_at: Math.floor(Date.now() / 1000) + 300,
-  }
-);
-
+    const signedUrl = cloudinary.utils.private_download_url(
+      submission.cloudinaryId,
+      fileFormat,
+      {
+        resource_type: submission.resourceType || "raw", // 👈 use stored resourceType
+        type: "authenticated",
+        expires_at: Math.floor(Date.now() / 1000) + 300,
+      }
+    );
 
     console.log(`✅ Signed URL generated (resource_type=${submission.resourceType || "raw"})`);
     return res.json({ signedUrl });
