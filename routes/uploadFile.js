@@ -55,26 +55,28 @@ router.post(
 
       let fileUrl = "";
       if (req.file) {
-        const result = await new Promise((resolve, reject) => {
-          const stream = cloudinary.uploader.upload_stream(
-            { folder: "course_files", resource_type: "auto" },
-            (error, result) => {
-              if (error) reject(error);
-              else resolve(result);
-            }
-          );
-          stream.end(req.file.buffer);
-        });
-        fileUrl = result.secure_url;
+     const result = await new Promise((resolve, reject) => {
+  const stream = cloudinary.uploader.upload_stream(
+    { folder: "course_files", resource_type: "auto", type: "authenticated" }, // ✅
+    (error, result) => {
+      if (error) reject(error);
+      else resolve(result);
+    }
+  );
+  stream.end(req.file.buffer);
+});
+fileUrl = result.secure_url; // save this in DB
       }
 
-      const newFile = new FileUpload({
-        courseId,
-        fileName: req.file.originalname,
-        fileUrl, // from Cloudinary
-        contentType: contentType || "file",
-        uploadedBy,
-      });
+ const newFile = new FileUpload({
+  courseId,
+  fileName: req.file.originalname,
+  fileUrl: result.secure_url,
+  publicId: result.public_id, // ✅ store public_id
+  contentType: contentType || "file",
+  uploadedBy,
+});
+
 
       await newFile.save();
 
@@ -179,28 +181,25 @@ router.delete(
 router.get("/:courseId/download/:fileId", authenticateToken, async (req, res) => {
   try {
     const file = await FileUpload.findById(req.params.fileId);
-    if (!file) {
-      return res.status(404).json({ error: "File not found" });
-    }
+    if (!file) return res.status(404).json({ error: "File not found" });
 
-    // Optional: Verify user has access to this course before allowing download
-
-    // Generate signed URL valid for 5 minutes
+    // Signed URL generate karo
     const signedUrl = cloudinary.utils.private_download_url(
-      file.fileUrl.split("/").pop().split(".")[0], // Extract public_id from URL
-      file.fileName.split(".").pop(), // extension (e.g. pdf)
+      file.publicId, 
+      file.fileName.split(".").pop(),
       {
-        type: "authenticated", // for private resources
+        type: "authenticated",
         expires_at: Math.floor(Date.now() / 1000) + 300, // 5 min expiry
       }
     );
 
-    res.redirect(signedUrl);
+    return res.json({ signedUrl }); // ✅ better than redirect
   } catch (error) {
     console.error("Download error:", error);
     res.status(500).json({ error: "Server error while downloading" });
   }
 });
+
 
 router.use((err, req, res, next) => {
   if (err.code === "LIMIT_FILE_SIZE") {
