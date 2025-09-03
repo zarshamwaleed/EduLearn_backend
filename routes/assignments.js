@@ -381,21 +381,36 @@ router.put('/assignment-submissions/:submissionId/grade', authenticateToken, aut
   }
 });
 
-// Download a submission file
+// Download a submission file (with signed Cloudinary URL)
 router.get('/:submissionId/download', async (req, res) => {
   try {
     const submission = await AssignmentSubmission.findById(req.params.submissionId);
-    if (!submission || !submission.file) {
-      return res.status(404).json({ message: 'File not found' });
+    if (!submission) {
+      return res.status(404).json({ message: 'Submission not found' });
     }
 
-    // Redirect to cloudinary file
-    return res.redirect(submission.file);
+    if (!submission.cloudinaryId) {
+      return res.status(400).json({ message: 'Cloudinary public_id missing for this file' });
+    }
+
+    // Extract file format from stored file URL (pdf, docx, etc.)
+    const fileFormat = submission.file?.split('.').pop() || 'pdf';
+
+    // Generate a signed, expiring download URL
+    const signedUrl = cloudinary.utils.private_download_url(
+      submission.cloudinaryId,
+      fileFormat,
+      { type: 'authenticated', expires_at: Math.floor(Date.now() / 1000) + 300 } // expires in 5 minutes
+    );
+
+    // Return signed URL to frontend
+    return res.json({ signedUrl });
   } catch (error) {
-    console.error('Error downloading file:', error);
+    console.error('Error generating signed download URL:', error);
     res.status(500).json({ message: 'Error downloading file' });
   }
 });
+
 
 
 module.exports = router;

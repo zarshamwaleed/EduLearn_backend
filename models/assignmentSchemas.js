@@ -6,9 +6,10 @@ const assignmentSubmissionSchema = new mongoose.Schema({
   studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   studentName: { type: String, required: true },
   studentEmail: { type: String, required: true },
-  submittedOn: { type: Date },
+  submittedOn: { type: Date, default: Date.now },
   marks: { type: Number },
-  file: { type: String },
+  file: { type: String },          // Secure URL from Cloudinary
+  cloudinaryId: { type: String },  // 👈 NEW: public_id for signed download
 });
 
 const assignmentSchema = new mongoose.Schema({
@@ -18,7 +19,8 @@ const assignmentSchema = new mongoose.Schema({
   totalMarks: { type: Number, required: true },
   dueDate: { type: Date, required: true },
   submissionsCount: { type: Number, default: 0 },
-  file: { type: String }, // NEW: Store assignment file path
+  file: { type: String },          // Secure URL from Cloudinary
+  cloudinaryId: { type: String },  // 👈 NEW: public_id for signed download
 });
 
 module.exports = {
