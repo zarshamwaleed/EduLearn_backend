@@ -361,6 +361,7 @@ router.post(
 
           fileUrl = result.secure_url;
           publicId = result.public_id;
+           resourceType = result.resource_type;
         } catch (uploadError) {
           console.error('Cloudinary upload failed:', uploadError);
           return res.status(500).json({
@@ -380,6 +381,7 @@ router.post(
         submittedOn: new Date(),
         file: fileUrl,
         cloudinaryId: publicId, // ✅ store for delete/download
+          resourceType,
       });
 
       await submission.save();
@@ -442,32 +444,20 @@ router.get("/assignment-submissions/:submissionId/download", async (req, res) =>
       return res.status(400).json({ message: "File missing Cloudinary ID" });
     }
 
-    // Detect file format from URL
-    let fileFormat = "pdf";
-    if (submission.file) {
-      const parts = submission.file.split(".");
-      if (parts.length > 1) fileFormat = parts.pop();
-    }
-
-    // ✅ Determine resource_type dynamically
-    let resourceType = "raw"; // default for PDFs, DOCX, etc.
-    if (["jpg", "jpeg", "png", "gif", "webp"].includes(fileFormat.toLowerCase())) {
-      resourceType = "image";
-    } else if (["mp4", "mov", "avi"].includes(fileFormat.toLowerCase())) {
-      resourceType = "video";
-    }
+    // File extension (for naming)
+    const fileFormat = submission.file?.split(".").pop() || undefined;
 
     const signedUrl = cloudinary.utils.private_download_url(
       submission.cloudinaryId,
       fileFormat,
       {
-        resource_type: resourceType, // 👈 CRUCIAL
+        resource_type: submission.resourceType || "raw", // 👈 use stored resourceType
         type: "authenticated",
         expires_at: Math.floor(Date.now() / 1000) + 300,
       }
     );
 
-    console.log(`✅ Signed URL generated for resource_type=${resourceType}`);
+    console.log(`✅ Signed URL generated (resource_type=${submission.resourceType || "raw"})`);
     return res.json({ signedUrl });
   } catch (error) {
     console.error("🚨 Error generating signed download URL:", error);
