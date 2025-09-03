@@ -382,12 +382,10 @@ router.put('/assignment-submissions/:submissionId/grade', authenticateToken, aut
 });
 
 router.get("/assignment-submissions/:submissionId/download", async (req, res) => {
-
   try {
     console.log("📥 Download request received:", req.params.submissionId);
 
     const submission = await AssignmentSubmission.findById(req.params.submissionId);
-
     if (!submission) {
       console.log("❌ No submission found for this ID");
       return res.status(404).json({ message: "Submission not found" });
@@ -398,33 +396,39 @@ router.get("/assignment-submissions/:submissionId/download", async (req, res) =>
       return res.status(400).json({ message: "File missing Cloudinary ID" });
     }
 
-    // Extract file extension from file URL (e.g. pdf, docx)
-    let fileFormat = "pdf"; // fallback
+    // Detect file format from URL
+    let fileFormat = "pdf";
     if (submission.file) {
       const parts = submission.file.split(".");
-      if (parts.length > 1) {
-        fileFormat = parts.pop();
-      }
+      if (parts.length > 1) fileFormat = parts.pop();
     }
 
-    // ✅ Generate a signed private URL
+    // ✅ Determine resource_type dynamically
+    let resourceType = "raw"; // default for PDFs, DOCX, etc.
+    if (["jpg", "jpeg", "png", "gif", "webp"].includes(fileFormat.toLowerCase())) {
+      resourceType = "image";
+    } else if (["mp4", "mov", "avi"].includes(fileFormat.toLowerCase())) {
+      resourceType = "video";
+    }
+
     const signedUrl = cloudinary.utils.private_download_url(
       submission.cloudinaryId,
       fileFormat,
       {
-        type: "authenticated", // makes it private
-        expires_at: Math.floor(Date.now() / 1000) + 300, // expires in 5 minutes
+        resource_type: resourceType, // 👈 CRUCIAL
+        type: "authenticated",
+        expires_at: Math.floor(Date.now() / 1000) + 300,
       }
     );
 
-    console.log("✅ Signed URL generated successfully");
-
+    console.log(`✅ Signed URL generated for resource_type=${resourceType}`);
     return res.json({ signedUrl });
   } catch (error) {
     console.error("🚨 Error generating signed download URL:", error);
     res.status(500).json({ message: "Error downloading file" });
   }
 });
+
 
 
 
