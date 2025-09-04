@@ -458,18 +458,30 @@ router.get("/assignment-submissions/:submissionId/download", async (req, res) =>
       return res.status(404).json({ message: "Submission not found" });
     }
 
-    if (!submission.file) {
-      console.log("⚠️ No file stored for this submission");
-      return res.status(400).json({ message: "File missing" });
+    if (!submission.cloudinaryId) {
+      console.log("⚠️ No Cloudinary public_id stored in DB for this file");
+      return res.status(400).json({ message: "File missing Cloudinary ID" });
     }
 
-    return res.json({ fileUrl: submission.file });
+    // ✅ Extract format safely
+    let fileFormat = undefined;
+    if (submission.file) {
+      const cleanUrl = submission.file.split("?")[0]; // remove query params
+      fileFormat = cleanUrl.split(".").pop(); // extract extension cleanly
+    }
+
+    // ✅ Use "upload" type instead of "authenticated"
+  if (!submission.file) return res.status(404).json({ message: "File missing" });
+res.json({ fileUrl: submission.file });
+
+
+    console.log(`✅ Signed URL generated: ${signedUrl}`);
+    return res.json({ signedUrl });
   } catch (error) {
-    console.error("🚨 Error generating download URL:", error);
+    console.error("🚨 Error generating signed download URL:", error);
     res.status(500).json({ message: "Error downloading file", error: error.message });
   }
 });
-
 
 
 
