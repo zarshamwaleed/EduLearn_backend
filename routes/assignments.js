@@ -341,19 +341,21 @@ router.post(
         return res.status(404).json({ message: 'Assignment not found' });
       }
 
-     let fileUrl = null;
+  // ✅ Declare variables at the top
+let fileUrl = null;
 let publicId = null;
-let resourceType = "raw"; // ✅ Declare early with a default
+let resourceType = "raw";
+let result = null; // <-- FIX: declare result globally
 
 if (req.file) {
   try {
-    const result = await new Promise((resolve, reject) => {
+    result = await new Promise((resolve, reject) => {
       cloudinary.uploader
         .upload_stream(
           { folder: "submissions", resource_type: "auto" },
-          (error, result) => {
+          (error, uploadResult) => {
             if (error) reject(error);
-            else resolve(result);
+            else resolve(uploadResult);
           }
         )
         .end(req.file.buffer);
@@ -361,7 +363,7 @@ if (req.file) {
 
     fileUrl = result.secure_url;
     publicId = result.public_id;
-    resourceType = result.resource_type || "raw"; // ✅ Safely overwrite
+    resourceType = result.resource_type || "raw";
   } catch (uploadError) {
     console.error("Cloudinary upload failed:", uploadError);
     return res.status(500).json({
@@ -371,10 +373,11 @@ if (req.file) {
   }
 }
 
-
-if (result.resource_type) {
+// ✅ Only check result if it exists
+if (result && result.resource_type) {
   resourceType = result.resource_type;
 }
+
       // ✅ Create new submission document
       const submission = new AssignmentSubmission({
         assignmentId: req.params.assignmentId,
