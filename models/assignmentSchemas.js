@@ -9,7 +9,10 @@ const assignmentSubmissionSchema = new mongoose.Schema({
   submittedOn: { type: Date },
   marks: { type: Number },
   file: { type: String },
+  cloudinaryId: { type: String },       // ✅ Needed for private download
+  resourceType: { type: String, default: "raw" }, // ✅ Store type
 });
+
 
 const assignmentSchema = new mongoose.Schema({
   courseId: { type: mongoose.Schema.Types.ObjectId, ref: 'CreateCourse', required: true },

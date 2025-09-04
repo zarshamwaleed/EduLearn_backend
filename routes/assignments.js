@@ -341,36 +341,37 @@ router.post(
         return res.status(404).json({ message: 'Assignment not found' });
       }
 
-      let fileUrl = null;
-      let publicId = null;
+     let fileUrl = null;
+let publicId = null;
+let resourceType = "raw"; // ✅ Declare early with a default
 
-      // ✅ Upload file to Cloudinary if present
-      if (req.file) {
-        try {
-          const result = await new Promise((resolve, reject) => {
-            cloudinary.uploader
-              .upload_stream(
-                { folder: 'submissions', resource_type: 'auto' },
-                (error, result) => {
-                  if (error) reject(error);
-                  else resolve(result);
-                }
-              )
-              .end(req.file.buffer);
-          });
+if (req.file) {
+  try {
+    const result = await new Promise((resolve, reject) => {
+      cloudinary.uploader
+        .upload_stream(
+          { folder: "submissions", resource_type: "auto" },
+          (error, result) => {
+            if (error) reject(error);
+            else resolve(result);
+          }
+        )
+        .end(req.file.buffer);
+    });
 
-          fileUrl = result.secure_url;
-          publicId = result.public_id;
-           resourceType = result.resource_type;
-        } catch (uploadError) {
-          console.error('Cloudinary upload failed:', uploadError);
-          return res.status(500).json({
-            message: 'Failed to upload file to Cloudinary',
-            error: uploadError.message,
-          });
-        }
-      }
-let resourceType = "raw";
+    fileUrl = result.secure_url;
+    publicId = result.public_id;
+    resourceType = result.resource_type || "raw"; // ✅ Safely overwrite
+  } catch (uploadError) {
+    console.error("Cloudinary upload failed:", uploadError);
+    return res.status(500).json({
+      message: "Failed to upload file to Cloudinary",
+      error: uploadError.message,
+    });
+  }
+}
+
+
 if (result.resource_type) {
   resourceType = result.resource_type;
 }
