@@ -15,14 +15,16 @@ const storage = multer.memoryStorage();
 const upload = multer({
   storage,
   fileFilter: (req, file, cb) => {
-    const filetypes = /pdf/;
-    const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
+    const filetypes = /jpeg|jpg|png|gif|pdf|mp4|mp3|ppt|pptx|xls|xlsx|doc|docx|txt/;
+    const extname = filetypes.test(
+      path.extname(file.originalname).toLowerCase()
+    );
     const mimetype = filetypes.test(file.mimetype.toLowerCase());
 
     if (extname && mimetype) {
       cb(null, true);
     } else {
-      cb(new Error("Only PDF files are allowed"), false);
+      cb(new Error("File type not allowed"), false);
     }
   },
 });
@@ -319,64 +321,64 @@ router.get('/assignments/:assignmentId/submissions', authenticateToken, authoriz
 
 // Submit an assignment
 router.post(
-  "/assignments/:assignmentId/submissions",
+  '/assignments/:assignmentId/submissions',
   authenticateToken,
-  upload.single("file"),
+  upload.single('file'),
   async (req, res) => {
     try {
       const { studentId, studentName, studentEmail, courseId } = req.body;
 
-      // Validate required fields
+      // ✅ Validate required fields
       if (!studentId || !studentName || !studentEmail || !courseId) {
         return res.status(400).json({
-          message: "Student ID, name, email, and course ID are required",
+          message: 'Student ID, name, email, and course ID are required',
         });
       }
 
-      // Validate assignment exists
+      // ✅ Validate assignment exists
       const assignment = await Assignment.findById(req.params.assignmentId);
       if (!assignment) {
-        return res.status(404).json({ message: "Assignment not found" });
+        return res.status(404).json({ message: 'Assignment not found' });
       }
 
-      let fileUrl = null;
-      let publicId = null;
-      let resourceType = "raw";
+  // ✅ Declare variables at the top
+let fileUrl = null;
+let publicId = null;
+let resourceType = "raw";
+let result = null; // <-- FIX: declare result globally
 
-      if (req.file) {
-        try {
-          const result = await new Promise((resolve, reject) => {
-            cloudinary.uploader
-              .upload_stream(
-                { folder: "submissions", resource_type: "auto" },
-                (error, uploadResult) => {
-                  if (error) reject(error);
-                  else resolve(uploadResult);
-                }
-              )
-              .end(req.file.buffer);
-          });
+if (req.file) {
+  try {
+    result = await new Promise((resolve, reject) => {
+      cloudinary.uploader
+        .upload_stream(
+          { folder: "submissions", resource_type: "auto" },
+          (error, uploadResult) => {
+            if (error) reject(error);
+            else resolve(uploadResult);
+          }
+        )
+        .end(req.file.buffer);
+    });
 
-          fileUrl = result.secure_url;
-          publicId = result.public_id;
-          resourceType = result.resource_type || "raw";
+    fileUrl = result.secure_url;
+    publicId = result.public_id;
+    resourceType = result.resource_type || "raw";
+  } catch (uploadError) {
+    console.error("Cloudinary upload failed:", uploadError);
+    return res.status(500).json({
+      message: "Failed to upload file to Cloudinary",
+      error: uploadError.message,
+    });
+  }
+}
 
-          console.log("✅ File uploaded to Cloudinary:", {
-            fileUrl,
-            publicId,
-            resourceType,
-            format: result.format,
-          });
-        } catch (uploadError) {
-          console.error("Cloudinary upload failed:", uploadError);
-          return res.status(500).json({
-            message: "Failed to upload file to Cloudinary",
-            error: uploadError.message,
-          });
-        }
-      }
+// ✅ Only check result if it exists
+if (result && result.resource_type) {
+  resourceType = result.resource_type;
+}
 
-      // Create new submission document
+      // ✅ Create new submission document
       const submission = new AssignmentSubmission({
         assignmentId: req.params.assignmentId,
         courseId,
@@ -385,30 +387,31 @@ router.post(
         studentEmail,
         submittedOn: new Date(),
         file: fileUrl,
-        cloudinaryId: publicId,
-        resourceType,
+        cloudinaryId: publicId, // ✅ store for delete/download
+          resourceType,
       });
 
       await submission.save();
 
-      // Increment submissionsCount
+      // ✅ Increment submissionsCount
       await Assignment.findByIdAndUpdate(req.params.assignmentId, {
         $inc: { submissionsCount: 1 },
       });
 
       res.status(201).json({
-        message: "Submission created successfully",
+        message: 'Submission created successfully',
         submission,
       });
     } catch (error) {
-      console.error("Error submitting assignment:", error);
+      console.error('Error submitting assignment:', error);
       res.status(500).json({
-        message: "Error submitting assignment",
+        message: 'Error submitting assignment',
         error: error.message,
       });
     }
   }
 );
+
 
 // Grade a submission
 router.put('/assignment-submissions/:submissionId/grade', authenticateToken, authorizeInstructor, async (req, res) => {
@@ -433,11 +436,10 @@ router.put('/assignment-submissions/:submissionId/grade', authenticateToken, aut
   }
 });
 
-router.get("/assignment-submissions/:submissionId/download", authenticateToken, authorizeInstructor, async (req, res) => {
+router.get("/assignment-submissions/:submissionId/download", async (req, res) => {
   try {
     console.log("📥 Download request received:", req.params.submissionId);
 
-    // Fetch submission from database
     const submission = await AssignmentSubmission.findById(req.params.submissionId);
     if (!submission) {
       console.log("❌ No submission found for this ID");
@@ -449,27 +451,21 @@ router.get("/assignment-submissions/:submissionId/download", authenticateToken, 
       return res.status(400).json({ message: "File missing Cloudinary ID" });
     }
 
-    // Ensure the resource_type is correctly set (default to "raw" if not specified)
-    const resourceType = submission.resourceType || "raw";
-
-    // Extract file format from the submission file URL or fallback to 'pdf'
-    let fileFormat = "pdf"; // Default to PDF
+    // ✅ Extract format safely
+    let fileFormat = undefined;
     if (submission.file) {
-      const cleanUrl = submission.file.split("?")[0]; // Remove query params
-      const extension = cleanUrl.split(".").pop()?.toLowerCase();
-      if (extension && ["pdf", "doc", "docx", "txt"].includes(extension)) {
-        fileFormat = extension;
-      }
+      const cleanUrl = submission.file.split("?")[0]; // remove query params
+      fileFormat = cleanUrl.split(".").pop(); // extract extension cleanly
     }
 
-    // Generate signed URL with correct resource_type and format
+    // ✅ Use "upload" type instead of "authenticated"
     const signedUrl = cloudinary.utils.private_download_url(
       submission.cloudinaryId,
       fileFormat,
       {
-        resource_type: resourceType, // Use stored resource_type
-        type: "upload", // Ensure it's an upload type
-        expires_at: Math.floor(Date.now() / 1000) + 300, // 5-minute expiry
+        resource_type: submission.resourceType || "raw",
+        type: "upload",  // ✅ FIX: use upload type
+        expires_at: Math.floor(Date.now() / 1000) + 300, // 5 min expiry
       }
     );
 
