@@ -451,26 +451,32 @@ router.get("/assignment-submissions/:submissionId/download", async (req, res) =>
       return res.status(400).json({ message: "File missing Cloudinary ID" });
     }
 
-    // File extension (for naming)
-    const fileFormat = submission.file?.split(".").pop() || undefined;
+    // ✅ Extract format safely
+    let fileFormat = undefined;
+    if (submission.file) {
+      const cleanUrl = submission.file.split("?")[0]; // remove query params
+      fileFormat = cleanUrl.split(".").pop(); // extract extension cleanly
+    }
 
+    // ✅ Use "upload" type instead of "authenticated"
     const signedUrl = cloudinary.utils.private_download_url(
       submission.cloudinaryId,
       fileFormat,
       {
-        resource_type: submission.resourceType || "raw", // 👈 use stored resourceType
-        type: "authenticated",
-        expires_at: Math.floor(Date.now() / 1000) + 300,
+        resource_type: submission.resourceType || "raw",
+        type: "upload",  // ✅ FIX: use upload type
+        expires_at: Math.floor(Date.now() / 1000) + 300, // 5 min expiry
       }
     );
 
-    console.log(`✅ Signed URL generated (resource_type=${submission.resourceType || "raw"})`);
+    console.log(`✅ Signed URL generated: ${signedUrl}`);
     return res.json({ signedUrl });
   } catch (error) {
     console.error("🚨 Error generating signed download URL:", error);
-    res.status(500).json({ message: "Error downloading file" });
+    res.status(500).json({ message: "Error downloading file", error: error.message });
   }
 });
+
 
 
 
