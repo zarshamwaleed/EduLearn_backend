@@ -169,11 +169,9 @@ router.get('/assignments/:assignmentId/download', authenticateToken, async (req,
     }
 
     const filePath = path.resolve(__dirname, '..', assignment.file.replace(/^\//, ''));
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ message: 'File not found on server' });
-    }
+   if (!assignment.file) return res.status(404).json({ message: 'No file available' });
+res.json({ fileUrl: assignment.file });
 
-    res.download(filePath, `${assignment.title}_assignment${path.extname(assignment.file)}`);
   } catch (error) {
     console.error('Error downloading assignment file:', error);
     res.status(500).json({ message: 'Error downloading assignment file', error: error.message });
@@ -264,7 +262,21 @@ router.put('/assignments/:assignmentId', authenticateToken, authorizeInstructor,
     if (description !== undefined) assignment.description = description; // Handle empty description
     if (totalMarks) assignment.totalMarks = parseInt(totalMarks);
     if (dueDate) assignment.dueDate = new Date(dueDate);
-    if (req.file) assignment.file = `/Uploads/${req.file.filename}`;
+ if (req.file) {
+  const result = await new Promise((resolve, reject) => {
+    cloudinary.uploader.upload_stream(
+      { folder: "assignments", resource_type: "auto" },
+      (err, uploadResult) => {
+        if (err) reject(err);
+        else resolve(uploadResult);
+      }
+    ).end(req.file.buffer);
+  });
+
+  assignment.file = result.secure_url;
+  assignment.cloudinaryId = result.public_id;
+}
+
 
     await assignment.save();
     res.json({ message: 'Assignment updated successfully', assignment });
@@ -459,15 +471,9 @@ router.get("/assignment-submissions/:submissionId/download", async (req, res) =>
     }
 
     // ✅ Use "upload" type instead of "authenticated"
-    const signedUrl = cloudinary.utils.private_download_url(
-      submission.cloudinaryId,
-      fileFormat,
-      {
-        resource_type: submission.resourceType || "raw",
-        type: "upload",  // ✅ FIX: use upload type
-        expires_at: Math.floor(Date.now() / 1000) + 300, // 5 min expiry
-      }
-    );
+  if (!submission.file) return res.status(404).json({ message: "File missing" });
+res.json({ fileUrl: submission.file });
+
 
     console.log(`✅ Signed URL generated: ${signedUrl}`);
     return res.json({ signedUrl });
